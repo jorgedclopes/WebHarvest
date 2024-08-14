@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="./images/marketing-graph-searching.png">
+    <title>Elasticsearch Data Table</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border: 1px solid #ddd;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .collapsible-content {
+            display: none;
+        }
+        .show-content {
+            display: block;
+        }
+        .toggle-button {
+            cursor: pointer;
+            color: blue;
+            text-decoration: underline;
+        }
+</style>
+    </style>
+</head>
+<body>
+    <h1>Elasticsearch Data Table</h1>
+
+    <div style="width: 100%;">
+        <div class='row' style="margin-bottom:3mm; float: left">
+            <label for="job-search-text">Job Title:</label>
+            <input type="text" size="50" id="job-search-text" placeholder="Enter text to search">
+            <button id="job-search-button">Search</button>
+        </div>
+        <div class='row' style="margin-bottom:3mm; float: right">
+            <label for="location-search-text">Location:</label>
+            <input type="text" id="location-search-text" placeholder="Germany">
+        </div>
+        <div style="margin-bottom:5mm; float:right;">
+        </div>
+    </div>
+
+    <table id="data-table">
+        <thead>
+            <tr id="table-headers"></tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+    </table>
+
+    <script>
+        // Elasticsearch configuration
+        const ELASTICSEARCH_URL = 'http://192.168.1.4:9200';
+        const INDEX_NAME = 'jobs';
+        const URL_FIELD_NAME = 'url'; // Replace with the name of your URL field
+        const COLLAPSIBLE_FIELD_NAME = 'description'; // Replace with the name of your collapsible field
+
+        // Function to fetch data from Elasticsearch
+        async function fetchData(job) {
+            job = job || ""
+            const response = await fetch(`${ELASTICSEARCH_URL}/${INDEX_NAME}/_search`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    size: 50,
+                    "query":{
+                      "query_string":{
+                         "default_field":"title",
+                         "query": "*" + job + "*"
+                      }
+                   }
+                })
+            });
+            const data = await response.json();
+            return data;
+        }
+
+        async function deleteAfterTTL() {
+            const timestamp = new Date().getTime() / 1000
+            const response = await fetch(`${ELASTICSEARCH_URL}/${INDEX_NAME}/_delete_by_query`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    "query": {
+                        "range" : {
+                            "ttl" : {
+                                "lte" : timestamp
+                            }
+                        }
+                    }
+                })
+            });
+            const data = await response.json();
+            console.info(timestamp)
+            console.info(data)
+            return data.hits;
+        }
+
+        // Function to generate table
+        function generateTable(data) {
+            const tableHeaders = document.getElementById('table-headers');
+            const tableBody = document.getElementById('table-body');
+
+            // Clear existing content
+            tableHeaders.innerHTML = '';
+            tableBody.innerHTML = '';
+
+            function getHeaders(d){
+                try{
+                    return Object.keys(d[0]._source);
+                } catch(e){
+                    return ["url", "title", "company", "location", "description", "source"];
+                }
+            }
+            // Extract headers
+            const headers = getHeaders(data);
+
+            // Create table headers
+            headers.forEach(header => {
+                const th = document.createElement('th');
+                th.textContent = header;
+                //th.style.width = "1%";
+                if (header != "ttl"){
+                    tableHeaders.appendChild(th);
+                }
+            });
+            if (data.length > 0) {
+
+                // Create table rows
+                data.forEach(item => {
+                    const tr = document.createElement('tr');
+                    headers.forEach(header => {
+                        const td = document.createElement('td');
+
+                        // Check if the field is the URL field
+                        if (header === "url") {
+                            const a = document.createElement('a');
+                            a.href = item._source[header];
+                            a.textContent = "Link";
+                            a.target = '_blank'; // Open link in a new tab
+                            td.appendChild(a);
+                        } else if (header === "description") {
+                            // Create collapsible content
+                            const span = document.createElement('span');
+                            span.classList.add('collapsible-content');
+                            span.innerHTML = item._source[header];
+
+                            // Create toggle button
+                            const button = document.createElement('span');
+                            button.classList.add('toggle-button');
+                            button.textContent = 'Show';
+                            button.onclick = () => {
+                                const isCollapsed = span.classList.toggle('show-content');
+                                button.textContent = isCollapsed ? 'Hide' : 'Show';
+                            };
+
+                            td.appendChild(button);
+                            td.appendChild(span);
+                        } else if (header === "ttl") {
+                            return;
+                        }
+                        else {
+                            td.textContent = item._source[header];
+                        }
+
+                        tr.appendChild(td);
+                    });
+                    tableBody.appendChild(tr);
+                });
+            }
+        }
+
+        // Function to handle search
+        async function handleSearch() {
+            const searchText = document.getElementById('job-search-text').value;
+            try {
+                const data = await fetchData(searchText);
+                generateTable(data);
+            } catch (error) {
+                console.error('Error fetching data:', error);
+            }
+        }
+
+        // Fetch data and generate table on page load
+        window.onload = async () => {
+            try {
+                await deleteAfterTTL();
+                const data = await fetchData("");
+                generateTable(data);
+            } catch (error) {
+                console.error('Error fetching data:', error);
+            }
+        };
+
+        document.getElementById('job-search-button').addEventListener('click', handleSearch);
+        document.getElementById('job-search-text').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+              handleSearch()
+            }
+        });
+
+        document.getElementById('location-search-text').addEventListener('keyup', function (e){
+            GeoLocation = document.getElementById('location-search-text').value
+            console.log(GeoLocation)
+        })
+    </script>
+</body>
+</html>

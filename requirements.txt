@@ -1,0 +1,7 @@
+selenium==4.21.0
+requests~=2.32.3
+elasticsearch==8.14.0
+beautifulsoup4==4.12.3
+blessed==1.20.0
+Django==5.0.6
+redis==5.0.7
